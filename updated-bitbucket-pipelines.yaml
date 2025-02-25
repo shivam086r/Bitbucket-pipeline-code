@@ -1,0 +1,95 @@
+image: shivam086r/pipeline-image:latest
+
+pipelines:
+  custom:
+    build-and-deploy:
+      - step:
+          name: Build and Deploy to S3
+          caches:
+            - maven
+          script:
+            # Update packages and install required tools
+            - mvn -v
+            - aws --version
+            - java -version
+
+            # Configure AWS CLI
+            - echo "Configuring AWS CLI"
+            - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+            - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+            - aws configure set region $AWS_DEFAULT_REGION
+
+            # Define the parameters for service name and branch
+            - SERVICE_NAME="user-service"  # Set the service name variable here
+            - BRANCH="$BITBUCKET_BRANCH"  # Bitbucket pipeline default branch variable
+
+            # Get the current year and month
+            - CURRENT_YEAR_MONTH=$(date +%Y.%m)
+
+            # Fetch the latest build version
+            - LATEST_BUILD=$(aws s3api list-objects-v2 --bucket "testeeeiing-artifacts" --prefix "${SERVICE_NAME}" --query "Contents[].Key" --output json | jq -r ".[] | select(test(\"${SERVICE_NAME}/paybyte-${SERVICE_NAME}-${CURRENT_YEAR_MONTH}\\\\.\\\\d{2}(-SNAPSHOT)?\\\\.jar\"))" | sort -V | tail -n 1)
+
+            # Print the value of LATEST_BUILD
+            - echo ${LATEST_BUILD}
+
+            # Default serial number if no previous build found
+            - NEW_SERIAL="01"
+
+            # If there is a latest build, extract the serial number
+            - >
+              if [[ -n "$LATEST_BUILD" ]]; then
+                LAST_SERIAL=$(echo "$LATEST_BUILD" | grep -oP "${SERVICE_NAME}/paybyte-${SERVICE_NAME}-${CURRENT_YEAR_MONTH}\.\K\d{2}")
+                LAST_SERIAL=$(echo $LAST_SERIAL | sed 's/^0//')  # Remove leading zero
+                NEW_SERIAL=$(printf "%02d" $((LAST_SERIAL + 1)))
+              fi
+
+
+            # Construct the build version
+            - BUILD_VERSION="${CURRENT_YEAR_MONTH}.${NEW_SERIAL}"
+
+            # Append -SNAPSHOT for non-main/master branches
+            - >
+              if [[ "$BRANCH" != "main" && "$BRANCH" != "master" ]]; then
+                BUILD_VERSION="${BUILD_VERSION}-SNAPSHOT"
+              fi
+
+            # Output the build version
+            - echo ${BUILD_VERSION}
+
+            # Build the application
+            - echo "Building the application"
+            - sed -i -E "s#(<version>).*SNAPSHOT.*(</version>)#\1${BUILD_VERSION}\2#" pom.xml
+            - mvn -B -DskipTests clean package
+
+            # Upload JAR to S3
+            - echo "Uploading JAR to S3"
+            - aws s3 cp target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar s3://testeeeiing-artifacts/${SERVICE_NAME}/
+
+            #Tagging Commit
+            - git config --global user.name "shivamrahangdale91"
+            - git config --global user.email "shivamrahangdale91@gmail.com"
+
+            # Debugging: Print the App Password (optional, for debugging purposes)
+            - echo ${BITBUCKET_APP_PASSWORD}
+
+            # Debugging: Print the BUILD_VERSION (optional, for debugging purposes)
+            - echo ${BUILD_VERSION}
+
+            # Validate BUILD_VERSION
+            - |
+              if [[ -z "${BUILD_VERSION}" ]]; then
+                echo "Build version is empty! Cannot tag commit."
+                exit 1
+              fi
+
+            # Fetch existing tags
+            - git fetch --tags
+
+            # Delete the tag locally if it already exists
+            - git tag -d "${BUILD_VERSION}" || true
+
+            # Create the new tag
+            - git tag -a "${BUILD_VERSION}" -m "Build"
+
+            # Push the tag to the remote repository
+            - git push "https://x-token-auth:${BITBUCKET_APP_PASSWORD}@bitbucket.org/shivamrahangdale91/paybyte-user-service.git" --tags --force
