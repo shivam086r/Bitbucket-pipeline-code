@@ -21,7 +21,7 @@ RUN echo "Installing required tools" && \
     rm -rf awscliv2.zip aws && \
     echo "AWS CLI installed successfully" && \
     # Install Git
-    sudo yum install git -y && \
+    yum install git -y && \
     # Print versions of Java, Maven, and AWS CLI
     java -version && \
     mvn -v && \
