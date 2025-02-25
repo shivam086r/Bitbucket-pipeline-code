@@ -4,7 +4,7 @@ pipelines:
   custom:
     build-and-deploy:
       - step:
-          name: Build and Deploy to S3
+          name: Build and Deploy artifact to S3
           caches:
             - maven
           script:
@@ -27,7 +27,7 @@ pipelines:
             - CURRENT_YEAR_MONTH=$(date +%Y.%m)
 
             # Fetch the latest build version
-            - LATEST_BUILD=$(aws s3api list-objects-v2 --bucket "paybyte-artifacts" --prefix "${SERVICE_NAME}" --query "Contents[].Key" --output json | jq -r ".[] | select(test(\"${SERVICE_NAME}/paybyte-${SERVICE_NAME}-${CURRENT_YEAR_MONTH}\\\\.\\\\d{2}(-SNAPSHOT)?\\\\.jar\"))" | sort -V | tail -n 1)
+            - LATEST_BUILD=$(aws s3api list-objects-v2 --bucket "testeeeiing-artifacts" --prefix "${SERVICE_NAME}" --query "Contents[].Key" --output json | jq -r ".[] | select(test(\"${SERVICE_NAME}/paybyte-${SERVICE_NAME}-${CURRENT_YEAR_MONTH}\\\\.\\\\d{2}(-SNAPSHOT)?\\\\.jar\"))" | sort -V | tail -n 1)
 
             # Print the value of LATEST_BUILD
             - echo  ${LATEST_BUILD}
