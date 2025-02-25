@@ -4,7 +4,7 @@ pipelines:
   custom:
     build-and-deploy:
       - step:
-          name: Build and Deploy artifact to S3
+          name: Build and Deploy to S3
           caches:
             - maven
           script:
@@ -30,7 +30,7 @@ pipelines:
             - LATEST_BUILD=$(aws s3api list-objects-v2 --bucket "testeeeiing-artifacts" --prefix "${SERVICE_NAME}" --query "Contents[].Key" --output json | jq -r ".[] | select(test(\"${SERVICE_NAME}/paybyte-${SERVICE_NAME}-${CURRENT_YEAR_MONTH}\\\\.\\\\d{2}(-SNAPSHOT)?\\\\.jar\"))" | sort -V | tail -n 1)
 
             # Print the value of LATEST_BUILD
-            - echo  ${LATEST_BUILD}
+            - echo ${LATEST_BUILD}
 
             # Default serial number if no previous build found
             - NEW_SERIAL="01"
@@ -39,8 +39,10 @@ pipelines:
             - >
               if [[ -n "$LATEST_BUILD" ]]; then
                 LAST_SERIAL=$(echo "$LATEST_BUILD" | grep -oP "${SERVICE_NAME}/paybyte-${SERVICE_NAME}-${CURRENT_YEAR_MONTH}\.\K\d{2}")
+                LAST_SERIAL=$(echo $LAST_SERIAL | sed 's/^0//')  # Remove leading zero
                 NEW_SERIAL=$(printf "%02d" $((LAST_SERIAL + 1)))
               fi
+
 
             # Construct the build version
             - BUILD_VERSION="${CURRENT_YEAR_MONTH}.${NEW_SERIAL}"
@@ -63,5 +65,15 @@ pipelines:
             - echo "Uploading JAR to S3"
             - aws s3 cp target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar s3://testeeeiing-artifacts/${SERVICE_NAME}/
 
-          artifacts:
-            - target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar
+            #Tagging Commit
+            - echo "Tagging paybyte-${SERVICE_NAME} repo commit from ${BITBUCKET_BRANCH} branch.."
+            - |
+              if [[ -z "${BUILD_VERSION}" ]]; then
+                echo "Build version is empty! Cannot tag commit."
+                exit 1
+              fi
+            - echo "https://${BITBUCKET_USERNAME}:${BITBUCKET_APP_PASSWORD}@bitbucket.org" > ~/.git-credentials
+            - git fetch --tags
+            - git tag -d "${BUILD_VERSION}" || true  # The || true ensures that the command doesn't fail if the tag doesn't exist
+            - git tag -a "${BUILD_VERSION}" -m "Build"
+            - git push "https://shivamrahangdale91:${BITBUCKET_APP_PASSWORD}@bitbucket.org/shivamrahangdale91/paybyte-${SERVICE_NAME}.git" --tags --force # --force to push the overridden tag
