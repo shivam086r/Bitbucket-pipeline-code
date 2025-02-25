@@ -26,8 +26,7 @@ RUN echo "Installing required tools" && \
     java -version && \
     mvn -v && \
     git --version && \
-    aws --version
-    
+    aws --version    
 
 # Set the default command to run
 CMD ["/bin/bash"]
