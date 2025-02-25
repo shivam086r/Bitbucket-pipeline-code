@@ -1,0 +1,43 @@
+image: amazonlinux:2023
+
+pipelines:
+  custom:
+    build-and-deploy:
+      - step:
+          name: Build and Deploy to S3
+          caches:
+            - maven
+          script:
+            # Update packages and install required tools
+            - echo "Installing required tools"
+            - yum install -y tar gzip unzip
+            - yum update -y
+            - yum install java-17-amazon-corretto -y
+
+            # Install Maven
+            - echo "Installing Maven"
+            - yum install maven -y
+            - mvn -v
+
+            # Install AWS CLI
+            - echo "Installing AWS CLI"
+            - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+            - unzip awscliv2.zip
+            - ./aws/install
+            - rm -rf awscliv2.zip aws
+
+            # Configure AWS CLI
+            - echo "Configuring AWS CLI"
+            - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+            - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+            - aws configure set region $AWS_DEFAULT_REGION
+
+            # Build the application
+            - echo "Building the application"
+            - mvn clean package -DskipTests # Build the JAR file
+
+            # Upload JAR to S3
+            - echo "Uploading JAR to S3"
+            - aws s3 cp target/paybyte-user-service-0.0.1-SNAPSHOT.jar s3://testeeeiing-artifacts/user-service/
+          artifacts:
+            - target/paybyte-user-service-0.0.1-SNAPSHOT.jar
