@@ -1,0 +1,24 @@
+# Stage 1: Build stage
+FROM amazonlinux:2023 AS builder
+
+# Install tools needed for the build
+RUN yum update -y && \
+    yum install -y tar gzip unzip java-17-amazon-corretto maven unzip
+
+# Install AWS CLI
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && \
+    unzip awscliv2.zip && \
+    ./aws/install && \
+    rm -rf awscliv2.zip aws
+
+# Stage 2: Final image
+FROM amazonlinux:2023
+
+# Copy only the necessary artifacts from the builder stage
+COPY --from=builder /usr/bin/mvn /usr/bin/java /usr/lib/jvm/java-17-amazon-corretto /usr/share/maven /etc/alternatives/
+
+# Manually copy AWS CLI installation folder from builder image
+COPY --from=builder /usr/local/aws-cli /usr/local/aws-cli
+
+# Set the default command to run and show the versions of Java, Maven, and AWS CLI
+CMD ["sh", "-c", "java -version && mvn -version && /usr/local/aws-cli/v2/current/bin/aws --version && /bin/bash"]
