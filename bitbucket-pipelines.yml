@@ -20,13 +20,17 @@ pipelines:
             - aws configure set region $AWS_DEFAULT_REGION
 
             # Define the parameters for service name and branch
+            - SERVICE_NAME="user-service"  # Set the service name variable here
             - BRANCH="$BITBUCKET_BRANCH"  # Bitbucket pipeline default branch variable
 
             # Get the current year and month
             - CURRENT_YEAR_MONTH=$(date +%Y.%m)
 
-            # Fetch the latest build version (equivalent of getBuildVersion function in Jenkins)
-            - LATEST_BUILD=$(aws s3api list-objects-v2 --bucket "paybyte-artifacts" --prefix "user-service" --query "Contents[].Key" --output json | jq -r ".[] | select(test(\"user-service/paybyte-user-service-${CURRENT_YEAR_MONTH}\\\\.\\\\d{2}(-SNAPSHOT)?\\\\.jar\"))" | sort -V | tail -n 1)
+            # Fetch the latest build version
+            - LATEST_BUILD=$(aws s3api list-objects-v2 --bucket "paybyte-artifacts" --prefix "${SERVICE_NAME}" --query "Contents[].Key" --output json | jq -r ".[] | select(test(\"${SERVICE_NAME}/paybyte-${SERVICE_NAME}-${CURRENT_YEAR_MONTH}\\\\.\\\\d{2}(-SNAPSHOT)?\\\\.jar\"))" | sort -V | tail -n 1)
+
+            # Print the value of LATEST_BUILD
+            - echo  ${LATEST_BUILD}
 
             # Default serial number if no previous build found
             - NEW_SERIAL="01"
@@ -34,7 +38,7 @@ pipelines:
             # If there is a latest build, extract the serial number
             - >
               if [[ -n "$LATEST_BUILD" ]]; then
-                LAST_SERIAL=$(echo "$LATEST_BUILD" | grep -oP "${SERVICE_NAME}/paybyte-user-service-${CURRENT_YEAR_MONTH}\.\K\d{2}")
+                LAST_SERIAL=$(echo "$LATEST_BUILD" | grep -oP "${SERVICE_NAME}/paybyte-${SERVICE_NAME}-${CURRENT_YEAR_MONTH}\.\K\d{2}")
                 NEW_SERIAL=$(printf "%02d" $((LAST_SERIAL + 1)))
               fi
 
@@ -57,7 +61,7 @@ pipelines:
 
             # Upload JAR to S3
             - echo "Uploading JAR to S3"
-            - aws s3 cp target/paybyte-user-service-${BUILD_VERSION}.jar s3://testeeeiing-artifacts/user-service/
+            - aws s3 cp target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar s3://testeeeiing-artifacts/${SERVICE_NAME}/
 
           artifacts:
-            - target/paybyte-user-service-${BUILD_VERSION}.jar
+            - target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar
