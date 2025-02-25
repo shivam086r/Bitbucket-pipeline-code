@@ -66,13 +66,14 @@ pipelines:
             - aws s3 cp target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar s3://testeeeiing-artifacts/${SERVICE_NAME}/
 
             #Tagging Commit
+            - git config --global credential.helper store
+            - echo "https://${BITBUCKET_USERNAME}:${BITBUCKET_APP_PASSWORD}@bitbucket.org" > ~/.git-credentials
+
+            # Tagging Commit
             - git config --global user.name "shivamrahangdale91"
             - git config --global user.email "shivamrahangdale91@gmail.com"
 
-            # Debugging: Print the App Password (optional, for debugging purposes)
-            - echo ${BITBUCKET_APP_PASSWORD}
-
-            # Debugging: Print the BUILD_VERSION (optional, for debugging purposes)
+            # Debugging: Print the BUILD_VERSION
             - echo ${BUILD_VERSION}
 
             # Validate BUILD_VERSION
@@ -91,5 +92,5 @@ pipelines:
             # Create the new tag
             - git tag -a "${BUILD_VERSION}" -m "Build"
 
-            # Push the tag to the remote repository
-            - git push "https://x-token-auth:${BITBUCKET_APP_PASSWORD}@bitbucket.org/shivamrahangdale91/paybyte-user-service.git" --tags --force
+            # Push the tag to the remote repository using HTTPS with credentials
+            - git push --tags
