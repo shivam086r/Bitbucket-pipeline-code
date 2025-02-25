@@ -8,7 +8,7 @@ pipelines:
           caches:
             - maven
           script:
-            #  Installed packages 
+            # Update packages and install required tools
             - mvn -v
             - aws --version
             - java -version
@@ -19,12 +19,45 @@ pipelines:
             - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
             - aws configure set region $AWS_DEFAULT_REGION
 
+            # Define the parameters for service name and branch
+            - BRANCH="$BITBUCKET_BRANCH"  # Bitbucket pipeline default branch variable
+
+            # Get the current year and month
+            - CURRENT_YEAR_MONTH=$(date +%Y.%m)
+
+            # Fetch the latest build version (equivalent of getBuildVersion function in Jenkins)
+            - LATEST_BUILD=$(aws s3api list-objects-v2 --bucket "paybyte-artifacts" --prefix "user-service" --query "Contents[].Key" --output json | jq -r ".[] | select(test(\"user-service/paybyte-user-service-${CURRENT_YEAR_MONTH}\\\\.\\\\d{2}(-SNAPSHOT)?\\\\.jar\"))" | sort -V | tail -n 1)
+
+            # Default serial number if no previous build found
+            - NEW_SERIAL="01"
+
+            # If there is a latest build, extract the serial number
+            - >
+              if [[ -n "$LATEST_BUILD" ]]; then
+                LAST_SERIAL=$(echo "$LATEST_BUILD" | grep -oP "${SERVICE_NAME}/paybyte-user-service-${CURRENT_YEAR_MONTH}\.\K\d{2}")
+                NEW_SERIAL=$(printf "%02d" $((LAST_SERIAL + 1)))
+              fi
+
+            # Construct the build version
+            - BUILD_VERSION="${CURRENT_YEAR_MONTH}.${NEW_SERIAL}"
+
+            # Append -SNAPSHOT for non-main/master branches
+            - >
+              if [[ "$BRANCH" != "main" && "$BRANCH" != "master" ]]; then
+                BUILD_VERSION="${BUILD_VERSION}-SNAPSHOT"
+              fi
+
+            # Output the build version
+            - echo ${BUILD_VERSION}
+
             # Build the application
             - echo "Building the application"
-            - mvn clean package -DskipTests # Build the JAR file
+            - sed -i -E "s#(<version>).*SNAPSHOT.*(</version>)#\1${BUILD_VERSION}\2#" pom.xml
+            - mvn -B -DskipTests clean package
 
             # Upload JAR to S3
             - echo "Uploading JAR to S3"
-            - aws s3 cp target/paybyte-user-service-0.0.1-SNAPSHOT.jar s3://testeeeiing-artifacts/user-service/
+            - aws s3 cp target/paybyte-user-service-${BUILD_VERSION}.jar s3://testeeeiing-artifacts/user-service/
+
           artifacts:
-            - target/paybyte-user-service-0.0.1-SNAPSHOT.jar
+            - target/paybyte-user-service-${BUILD_VERSION}.jar
