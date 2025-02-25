@@ -7,7 +7,7 @@ ENV LANG C.UTF-8
 # Update the system and install required tools
 RUN echo "Installing required tools" && \
     yum update -y && \
-    yum install -y tar gzip unzip && \
+    yum install -y tar gzip unzip jq && \
     yum install java-17-amazon-corretto -y && \
     echo "Java installed successfully" && \  
     # Install Maven
@@ -19,11 +19,15 @@ RUN echo "Installing required tools" && \
     unzip awscliv2.zip && \
     ./aws/install && \
     rm -rf awscliv2.zip aws && \
-    echo "AWS CLI installed successfully" && \ 
+    echo "AWS CLI installed successfully" && \
+    # Install Git
+    sudo yum install git -y && \
     # Print versions of Java, Maven, and AWS CLI
     java -version && \
     mvn -v && \
+    git --version && \
     aws --version
+    
 
 # Set the default command to run
 CMD ["/bin/bash"]
