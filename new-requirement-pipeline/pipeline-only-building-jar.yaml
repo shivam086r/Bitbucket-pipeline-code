@@ -1,0 +1,75 @@
+image: shivam086r/pipeline-image:latest
+
+pipelines:
+  custom:
+    build-and-deploy:
+      - step:
+          name: Build and Deploy to S3
+          caches:
+            - maven
+          script:
+            # Check Maven, AWS CLI, and Java versions
+            - mvn -v
+            - aws --version
+            - java -version
+
+            # Configure AWS CLI
+            - echo "Configuring AWS CLI"
+            - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+            - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+            - aws configure set region $AWS_DEFAULT_REGION
+
+            # Set the service name
+            - SERVICE_NAME="customer-service"  # Set the service name variable here
+            - BRANCH="$BITBUCKET_BRANCH"  # Bitbucket pipeline default branch variable
+
+            # Extract the version directly from pom.xml (the version is under <version> in your pom.xml)
+            - BUILD_VERSION=$(awk '/<groupId>com.javatechie<\/groupId>/,/<\/project>/' pom.xml | grep -oPm1 "(?<=<version>)(.*)(?=</version>)")
+ 
+            # Debugging: Output the final build version
+            - echo "Final build version ${BUILD_VERSION}"
+
+            # Build the application
+            - echo "Building the application"
+            - mvn -B -DskipTests clean package
+
+            # Debugging: List files in the target directory
+            - echo "Listing files in target directory"
+            - ls target/
+
+            # Check if the expected JAR file exists
+            - echo "Checking if the JAR file exists"
+            - ls target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar || echo "JAR file not found!"
+
+            # Upload JAR to S3
+            - aws s3 cp target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar s3://testeeeiing-artifacts/${SERVICE_NAME}/
+
+            # Tagging Commit
+            - git config --global credential.helper store
+            - echo "https://${BITBUCKET_USERNAME}:${BITBUCKET_APP_PASSWORD}@bitbucket.org" > ~/.git-credentials
+
+            # Tagging Commit
+            - git config --global user.name "shivamrahangdale91"
+            - git config --global user.email "shivamrahangdale91@gmail.com"
+
+            # Debugging: Print the BUILD_VERSION
+            - echo "Build version for tagging ${BUILD_VERSION}"
+
+            # Validate BUILD_VERSION
+            - |
+              if [[ -z "${BUILD_VERSION}" ]]; then
+                echo "Build version is empty! Cannot tag commit."
+                exit 1
+              fi
+
+            # Fetch existing tags
+            - git fetch --tags
+
+            # Delete the tag locally if it already exists
+            - git tag -d "${BUILD_VERSION}" || true
+
+            # Create the new tag
+            - git tag -a "${BUILD_VERSION}" -m "Build"
+
+            # Push the tag to the remote repository using HTTPS with credentials
+            - git push --tags
