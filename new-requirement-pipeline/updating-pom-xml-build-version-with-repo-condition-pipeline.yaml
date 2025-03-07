@@ -1,0 +1,109 @@
+image: shivam086r/pipeline-image:latest
+
+pipelines:
+  custom:
+    build-and-deploy:
+      - step:
+          name: Build and Deploy to S3
+          caches:
+            - maven
+          script:
+            # Check Maven, AWS CLI, and Java versions
+            - mvn -v
+            - aws --version
+            - java -version
+
+            # Configure AWS CLI
+            - echo "Configuring AWS CLI"
+            - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+            - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+            - aws configure set region $AWS_DEFAULT_REGION
+
+            # Set the service name
+            - SERVICE_NAME="customer-service"  # Set the service name variable here
+            - BRANCH="$BITBUCKET_BRANCH"  # Bitbucket pipeline default branch variable
+
+            # Extract the version directly from pom.xml (the version is under <version> in your pom.xml)
+            - BUILD_VERSION=$(awk '/<groupId>com.javatechie<\/groupId>/,/<\/project>/' pom.xml | grep -oPm1 "(?<=<version>)(.*)(?=</version>)")
+ 
+            # Debugging: Output the final build version
+            - echo "Final build version ${BUILD_VERSION}"
+
+            # Build the application
+            - echo "Building the application"
+            - mvn -B -DskipTests clean package
+
+            # Debugging: List files in the target directory
+            - echo "Listing files in target directory"
+            - ls target/
+
+            # Check if the expected JAR file exists
+            - echo "Checking if the JAR file exists"
+            - ls target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar || echo "JAR file not found!"
+
+            # Upload JAR to S3
+            - aws s3 cp target/paybyte-${SERVICE_NAME}-${BUILD_VERSION}.jar s3://testeeeiing-artifacts/${SERVICE_NAME}/
+
+            # Tagging Commit
+            - git config --global credential.helper store
+            - echo "https://${BITBUCKET_USERNAME}:${BITBUCKET_APP_PASSWORD}@bitbucket.org" > ~/.git-credentials
+
+            # Tagging Commit
+            - git config --global user.name "shivamrahangdale91"
+            - git config --global user.email "shivamrahangdale91@gmail.com"
+
+            # Debugging: Print the BUILD_VERSION
+            - echo "Build version for tagging ${BUILD_VERSION}"
+
+            # Validate BUILD_VERSION
+            - |
+              if [[ -z "${BUILD_VERSION}" ]]; then
+                echo "Build version is empty! Cannot tag commit."
+                exit 1
+              fi
+
+            # Fetch existing tags
+            - git fetch --tags
+
+            # Delete the tag locally if it already exists
+            - git tag -d "${BUILD_VERSION}" || true
+
+            # Create the new tag
+            - git tag -a "${BUILD_VERSION}" -m "Build"
+
+            # Push the tag to the remote repository using HTTPS with credentials
+            - git push --tags
+
+            # Get the current branch name
+            - BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+
+            # Check if the branch is main, master, or release
+            - >
+             if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" || "$BRANCH_NAME" == release* ]]; then
+                echo "Branch is main, master, or release, proceeding with version bump"
+                # Step 1: Extract the build number (version) from pom.xml
+                BUILD_NUMBER=$(awk '/<groupId>com.javatechie<\/groupId>/,/<\/project>/' pom.xml | grep -oPm1 "(?<=<version>)(.*)(?=</version>)")
+
+                # Step 2: Increment the last segment of the version number
+                # Split the version into parts (major, minor, patch), then increment the patch version
+                IFS='.' read -r -a VERSION_PARTS <<< "$BUILD_NUMBER"
+
+                # Increment the patch number (the third segment)
+                VERSION_PARTS[2]=$((VERSION_PARTS[2] + 1))
+
+                # Format the patch number to always be 2 digits (e.g., 03 instead of 3)
+                PATCH_NUMBER=$(printf "%02d" ${VERSION_PARTS[2]})
+
+                # Join the version parts back into a single string
+                NEW_BUILD_NUMBER="${VERSION_PARTS[0]}.${VERSION_PARTS[1]}.$PATCH_NUMBER"
+
+                # Step 3: Update the version in pom.xml using sed
+                sed -i "s/<version>$BUILD_NUMBER<\/version>/<version>$NEW_BUILD_NUMBER<\/version>/" pom.xml
+
+                # Step 4: Commit the changes to Git
+                git add pom.xml
+                git commit -m "Bumped version to $NEW_BUILD_NUMBER"
+                git push
+              else
+                echo "Skipping version bump as the branch is not main, master, or release"
+              fi
