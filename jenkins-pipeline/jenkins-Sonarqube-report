@@ -1,0 +1,137 @@
+def tags=[:]
+tags["file-type"]="jar"
+
+def ex(value, message){
+    currentBuild.result = 'ABORTED'
+    error(message + '\nValue passed: ' + value)
+}
+
+pipeline {
+    agent {
+        label "workers"
+    }
+    environment {
+        SQ_TOKEN_FILE='sonarqube_token.txt'
+        AWS_REGION = 'ap-south-1'
+    }
+    parameters {
+        string description: 'Application build version in YYYY.MM.DD format', name: 'build_version', trim: true
+        choice choices: ['customer-service', 'merchant-service', 'notification-service', 'order-service', 'product-service', 'transaction-service', 'user-service', 'utility-service'], description: 'Application name', name: 'service_name'
+        string description: 'Branch name', name: 'branch', trim: true
+        booleanParam description: 'Require SonarQube code analysis?', defaultValue: false, name: 'sq_code_analysis_reqd'
+    }
+    stages {
+        stage('Pre-Flight checks for Parameters') {
+            steps {
+                script {
+                    if (!params.build_version?.trim()) {
+                        ex(params.build_version, "Parameter build_version used for application build version is empty. Exiting!")
+                    }
+                    boolean isMain = params.branch ==~ /^main$/
+                    boolean isMaster = params.branch ==~ /^master$/
+                    if (isMain || isMaster) {
+                        boolean isMatched = params.build_version ==~ /^\d{4}\.\d{2}\.\d{2}$/
+                        if (!isMatched) {
+                            ex(params.build_version, "Parameter build_version used for application build version does not match the pattern YYYY.MM.XX. Exiting!")
+                        }
+                    }
+                    else {
+                        boolean isMatched = params.build_version ==~ /^\d{4}\.\d{2}\.\d{2}-SNAPSHOT$/
+                        if (!isMatched) {
+                            ex(params.build_version, "Branch name is not one of 'main' or 'master'. Hence, the Parameter build_version should have the -SNAPSHOT suffix. Exiting!")
+                        }
+                    }
+                    println "Pre-Flight checks for parameters - Complete!"
+                }
+            }
+        }
+        stage('Java and Maven version') {
+            steps {
+                sh 'echo "### Java version ###"; java -version; echo "### Maven version ###"; mvn -v'
+            }
+        }
+        stage('Clone') {
+            steps {
+                echo "Pulling from paybyte-${service_name} repo ${branch} branch.."
+                git branch: "${branch}", changelog: false, credentialsId: 'bitbucket-credentials', poll: false, url: "https://prasun-paybyte@bitbucket.org/paybyte/paybyte-${service_name}.git"
+            }
+        }
+        stage('Update Release version') {
+            steps {
+                sh 'sed -i -E "s#(<version>).*SNAPSHOT.*(</version>)#\\1${build_version}\\2#" pom.xml'
+            }
+        }
+        stage('Maven clean package') {
+            steps {
+                sh 'mvn -B -DskipTests clean package'
+            }
+        }
+        stage('Generate SQ token') {
+            steps {
+                withCredentials([usernameColonPassword(credentialsId: 'sonarqube-credentials', variable: 'USERPASS')]) {
+                    sh 'curl -X POST -H "Content-Type: application/x-www-form-urlencoded" -d "name=jenkins" -u "$USERPASS" http://sonarqube.paybyte.company/api/user_tokens/generate | jq -r .token > "${SQ_TOKEN_FILE}"'
+                }
+            }
+            when { equals expected: true, actual: params.sq_code_analysis_reqd }
+        }
+        stage('Code Analysis') {
+            steps {
+                sh ''' token=$(cat "\${SQ_TOKEN_FILE}") && \
+                sonar-scanner -Dsonar.host.url="http://sonarqube.paybyte.company/" \
+                -Dsonar.login="${token}" \
+                -Dsonar.projectName="${service_name}" \
+                -Dsonar.java.binaries=. \
+                -Dsonar.projectKey="${service_name}" \
+                -Dsonar.verbose=true \
+                -Dsonar.qualitygate.wait=true \
+                -Dsonar.qualitygate.timeout=600
+                '''
+            }
+            when { equals expected: true, actual: params.sq_code_analysis_reqd }
+        }
+        stage('Revoke SQ token') {
+            steps {
+                withCredentials([usernameColonPassword(credentialsId: 'sonarqube-credentials', variable: 'USERPASS')]) {
+                    sh 'curl -X POST -H "Content-Type: application/x-www-form-urlencoded" -d "name=jenkins" -u "$USERPASS" http://sonarqube.paybyte.company/api/user_tokens/revoke'
+                }
+            }
+            when { equals expected: true, actual: params.sq_code_analysis_reqd }
+        }
+    }
+    post {
+        always {
+            sh 'echo "Always clean up pipeline workspace"'
+            sh 'rm -rf /home/ec2-user/workspace/build-java-artifacts-and-upload-to-s3/*'
+            sh 'rm -rf /home/ec2-user/.m2*'
+            
+            // Send SonarQube report via SES (if analysis ran)
+            script {
+                if (params.sq_code_analysis_reqd) {
+                    def sonarUrl = "http://sonarqube.paybyte.company/dashboard?id=${params.service_name}"
+                    withCredentials([[
+                        $class: 'AmazonWebServicesCredentialsBinding',
+                        credentialsId: 'aws-credentials',  // Jenkins stored AWS credentials
+                        accessKeyVariable: 'AWS_ACCESS_KEY_ID',
+                        secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'
+                    ]]) {
+                        sh """
+                            aws ses send-email \
+                              --region ${AWS_REGION} \
+                              --from "monitoring@paybyte.company" \
+                              --to "shivam.rahangdale@paybyte.company" \
+                              --subject "SonarQube Report: ${params.service_name} (Build ${params.build_version})" \
+                              --text "SonarQube analysis completed. View report: ${sonarUrl}" \
+                              --html "<html><body>
+                                <h3>SonarQube Report: ${params.service_name}</h3>
+                                <p><b>Build Version:</b> ${params.build_version}</p>
+                                <p><b>Branch:</b> ${params.branch}</p>
+                                <p><b>Report Link:</b> <a href='${sonarUrl}'>Click Here</a></p>
+                                <p><b>Build Status:</b> ${currentBuild.currentResult}</p>
+                              </body></html>"
+                        """
+                    }
+                }
+            }
+        }
+    }
+}
