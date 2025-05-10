@@ -1,0 +1,25 @@
+image: shivam086r/amazon-linux-packer-ami:v1
+
+pipelines:
+  default:
+    - step:
+        name: Build AMI with Packer
+        services:
+          - docker
+        script:
+
+          # Configure AWS CLI
+          - echo "Configuring AWS CLI"
+          - aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+          - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+          - aws configure set region $AWS_DEFAULT_REGION
+
+          # Optional: create the jenkins_key.pub dynamically if passed as env var
+          #- echo "$JENKINS_SSH_KEY" > jenkins_key.pub
+
+          # Validate Packer template
+          - packer init .
+          - packer validate -var-file=paybyte.pkrvars.hcl paybyte-services-set-1.pkr.hcl
+
+          # Build AMI
+          - packer build -var-file=paybyte.pkrvars.hcl paybyte-services-set-1.pkr.hcl
