@@ -14,8 +14,9 @@ pipelines:
           - aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
           - aws configure set region $AWS_DEFAULT_REGION
 
-          # Optional: create the jenkins_key.pub dynamically if passed as env var
-          #- echo "$JENKINS_SSH_KEY" > jenkins_key.pub
+          # Download the SSH public key from S3
+          - echo "Downloading SSH key from S3"
+          - aws s3 cp s3://payb-artifacts/ssh_key/id_rsa.pub id_rsa.pub
 
           # Validate Packer template
           - packer init .
